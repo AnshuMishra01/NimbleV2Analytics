@@ -48,11 +48,20 @@ function computeFunnel(sessions: SessionMetrics[]): FunnelData {
 	};
 }
 
+function isErrorLog(log: ParsedLog): boolean {
+	if (log.event === 'Error' || log.infoType === 'Error' || log.infoType === 'Exception' || log.infoType === 'Critical') return true;
+	// Catch NetworkCallResponse with errorMessage/errorDetails/errorResponse fields
+	if (log.event === 'NetworkCallResponse' && log.value) {
+		if (log.value.errorMessage || log.value.errorDetails || log.value.errorResponse) return true;
+	}
+	return false;
+}
+
 function computeErrorsBySource(logs: ParsedLog[]): ErrorBySource[] {
 	const sourceMap = new Map<string, { count: number; sample?: string }>();
 
 	for (const log of logs) {
-		if (log.event === 'Error' || log.infoType === 'Error' || log.infoType === 'Exception' || log.infoType === 'Critical') {
+		if (isErrorLog(log)) {
 			const source = log.source || log.event;
 			const existing = sourceMap.get(source);
 			if (existing) {
@@ -61,7 +70,7 @@ function computeErrorsBySource(logs: ParsedLog[]): ErrorBySource[] {
 				// Extract a meaningful error message from value
 				let sample: string | undefined;
 				if (log.value) {
-					const err = log.value.error ?? log.value.message ?? log.value.reason;
+					const err = log.value.errorMessage ?? log.value.error ?? log.value.message ?? log.value.reason;
 					if (typeof err === 'string') sample = err.substring(0, 200);
 					else if (typeof err === 'object' && err !== null) {
 						const msg = (err as Record<string, unknown>).message;
@@ -81,7 +90,7 @@ function computeErrorsBySource(logs: ParsedLog[]): ErrorBySource[] {
 function collectErrorLogs(logs: ParsedLog[]): ErrorLog[] {
 	const errors: ErrorLog[] = [];
 	for (const log of logs) {
-		if (log.event === 'Error' || log.infoType === 'Error' || log.infoType === 'Exception' || log.infoType === 'Critical') {
+		if (isErrorLog(log)) {
 			errors.push({
 				sessionId: log.sessionId,
 				shop: log.shop,
@@ -110,6 +119,7 @@ function computeFailures(sessions: SessionMetrics[], logs: ParsedLog[]): Failure
 		networkErrors: sessions.reduce((sum, s) => sum + s.networkErrorCount, 0),
 		exceptions: sessions.reduce((sum, s) => sum + s.exceptionCount, 0),
 		hypersdkErrors: sessions.reduce((sum, s) => sum + s.hypersdkErrorCount, 0),
+		recommendationFailures: sessions.reduce((sum, s) => sum + s.recommendationFailureCount, 0),
 		errorsBySource: computeErrorsBySource(logs)
 	};
 }
@@ -220,7 +230,7 @@ function buildSessionSummaries(sessions: SessionMetrics[], logs: ParsedLog[]): S
 	// Build error source map per session
 	const errorSourceMap = new Map<string, Set<string>>();
 	for (const log of logs) {
-		if (log.event === 'Error' || log.infoType === 'Error' || log.infoType === 'Exception') {
+		if (isErrorLog(log)) {
 			const sources = errorSourceMap.get(log.sessionId) ?? new Set();
 			sources.add(log.source || log.event);
 			errorSourceMap.set(log.sessionId, sources);

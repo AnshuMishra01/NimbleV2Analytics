@@ -11,6 +11,7 @@ import {
 	ADDRESS_VALIDATE_SOURCES,
 	ORDER_CREATION_SOURCES,
 	ORDER_STATUS_SOURCES,
+	RECOMMENDATION_SOURCES,
 	HYPERSDK_SOURCES,
 	INSTRUMENT_KEYWORDS
 } from '$common/constants';
@@ -31,7 +32,14 @@ function isNetworkError(log: ParsedLog): boolean {
 	const status = log.value.statusCode ?? log.value.status ?? log.value.code;
 	if (typeof status === 'number' && status >= 400) return true;
 	if (log.value.error || log.value.isError) return true;
+	// Catch errors with errorMessage/errorDetails even when errorCode is 200
+	if (log.value.errorMessage || log.value.errorDetails || log.value.errorResponse) return true;
 	return false;
+}
+
+function hasErrorFields(log: ParsedLog): boolean {
+	if (!log.value) return false;
+	return !!(log.value.errorMessage || log.value.errorDetails || log.value.errorResponse);
 }
 
 function detectInstrument(log: ParsedLog): InstrumentType | null {
@@ -118,6 +126,7 @@ export function computeSessionMetrics(sessionId: string, logs: ParsedLog[]): Ses
 		txnPollFailureCount: 0,
 		txnInitiationSuccessCount: 0,
 		customPaymentFailureCount: 0,
+		recommendationFailureCount: 0,
 
 		reachedAuth: false,
 		reachedAuthSuccess: false,
@@ -211,6 +220,13 @@ export function computeSessionMetrics(sessionId: string, logs: ParsedLog[]): Ses
 		}
 		if (sourceMatches(source, CUSTOM_PAYMENT_SOURCES)) {
 			if (isResponse && failed) metrics.customPaymentFailureCount++;
+		}
+
+		// --- Recommendations ---
+		if (sourceMatches(source, RECOMMENDATION_SOURCES)) {
+			if (isResponse && (failed || isNetworkError(log) || hasErrorFields(log))) {
+				metrics.recommendationFailureCount++;
+			}
 		}
 
 		// --- HyperSDK ---

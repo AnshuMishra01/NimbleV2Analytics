@@ -23,6 +23,9 @@ export const ADDRESS_VALIDATE_SOURCES = ['getAddressValidation', 'validateAddres
 export const ORDER_CREATION_SOURCES = ['createOrder', 'updateOrder'];
 export const ORDER_STATUS_SOURCES = ['getOrderStatus'];
 
+// Recommendations
+export const RECOMMENDATION_SOURCES = ['fetchStaticRecommendations', 'fetchRecommendations', 'getRecommendations'];
+
 // HyperSDK
 export const HYPERSDK_SOURCES = ['processHeadless', 'processHeadlessSync', 'processWidgetWithPayload', 'onSDKEvent'];
 

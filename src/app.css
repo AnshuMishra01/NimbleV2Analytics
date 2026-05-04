@@ -4,18 +4,72 @@
 	--bg-primary: #0f172a;
 	--bg-secondary: #1e293b;
 	--bg-card: #1e293b;
+	--bg-hover: #253349;
 	--border: #334155;
 	--text-primary: #f1f5f9;
 	--text-secondary: #94a3b8;
+	--text-muted: #64748b;
 	--accent: #3b82f6;
 	--accent-hover: #2563eb;
+	--accent-subtle: #1e3a5f;
 	--success: #22c55e;
+	--success-subtle: #14532d;
 	--warning: #f59e0b;
+	--warning-subtle: #713f12;
 	--danger: #ef4444;
+	--danger-subtle: #7f1d1d;
 }
 
 body {
 	background-color: var(--bg-primary);
 	color: var(--text-primary);
 	font-family: 'Inter', system-ui, -apple-system, sans-serif;
+	-webkit-font-smoothing: antialiased;
+}
+
+/* Allow text selection everywhere */
+* {
+	-webkit-user-select: text;
+	user-select: text;
+}
+
+button, a, [role="button"] {
+	-webkit-user-select: none;
+	user-select: none;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+	width: 6px;
+	height: 6px;
+}
+::-webkit-scrollbar-track {
+	background: var(--bg-primary);
+}
+::-webkit-scrollbar-thumb {
+	background: var(--border);
+	border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+	background: var(--text-muted);
+}
+
+/* Table text selection */
+table td, table th, pre, code, .font-mono {
+	-webkit-user-select: text;
+	user-select: text;
+	cursor: text;
+}
+
+/* Clickable rows should show pointer */
+tr.cursor-pointer {
+	cursor: pointer;
+}
+tr.cursor-pointer td {
+	cursor: pointer;
+}
+
+/* Input styling */
+input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+	filter: invert(0.7);
 }

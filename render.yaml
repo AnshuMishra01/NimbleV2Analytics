@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: nimble-v2-analytics
+    runtime: node
+    plan: free
+    buildCommand: pnpm install && pnpm build
+    startCommand: node start.js
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: CRON_ENABLED
+        value: true
+      - key: CRON_COOKIE
+        sync: false
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: 587
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: REPORT_FROM
+        sync: false
+      - key: REPORT_TO
+        value: anshu.mishra@juspay.in,nikita.gupta@juspay.in,bhumika.saluja@juspay.in

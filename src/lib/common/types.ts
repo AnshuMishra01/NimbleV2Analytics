@@ -92,6 +92,9 @@ export interface SessionMetrics {
 	// Custom Payment
 	customPaymentFailureCount: number;
 
+	// Recommendations
+	recommendationFailureCount: number;
+
 	// Funnel stages reached
 	reachedAuth: boolean;
 	reachedAuthSuccess: boolean;
@@ -142,6 +145,7 @@ export interface FailureData {
 	networkErrors: number;
 	exceptions: number;
 	hypersdkErrors: number;
+	recommendationFailures: number;
 	errorsBySource: ErrorBySource[];
 }
 
