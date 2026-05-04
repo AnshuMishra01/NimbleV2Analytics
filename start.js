@@ -1,4 +1,8 @@
 // Startup script: starts the cron scheduler then boots the SvelteKit server
+// Bind to 0.0.0.0 for Render/Docker (SvelteKit adapter-node reads HOST env)
+if (!process.env.HOST) process.env.HOST = '0.0.0.0';
+if (!process.env.PORT) process.env.PORT = '3000';
+
 import cron from 'node-cron';
 
 const CRON_ENABLED = process.env.CRON_ENABLED === 'true';
