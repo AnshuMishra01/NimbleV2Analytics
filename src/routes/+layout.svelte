@@ -12,6 +12,7 @@
 			<div class="flex items-center gap-1 bg-[var(--bg-card)] rounded-lg p-0.5">
 				<a href="/" class="px-3 py-1.5 text-sm rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">Dashboard</a>
 				<a href="/sessions" class="px-3 py-1.5 text-sm rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">Sessions</a>
+				<a href="/ab-test" class="px-3 py-1.5 text-sm rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">A/B Test</a>
 			</div>
 		</div>
 		<div class="flex items-center gap-3">

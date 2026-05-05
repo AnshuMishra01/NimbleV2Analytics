@@ -209,6 +209,11 @@ export interface ErrorLog {
 	value: Record<string, unknown> | null;
 }
 
+export interface ABTestResponse {
+	v1: DashboardResponse;
+	v2: DashboardResponse;
+}
+
 export interface DashboardResponse {
 	overview: OverviewData;
 	funnel: FunnelData;

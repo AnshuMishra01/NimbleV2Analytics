@@ -3,6 +3,7 @@ import { ES_ENDPOINT_RELEASE, ES_INDEX, ES_MAX_SIZE } from '$common/constants';
 export interface ESQuery {
 	filter: Record<string, unknown>[];
 	must?: Record<string, unknown>;
+	must_not?: Record<string, unknown>[];
 	size?: number;
 	searchAfter?: unknown[];
 }
@@ -42,7 +43,8 @@ export async function queryES(cookie: string, query: ESQuery): Promise<ESHit[]> 
 		query: {
 			bool: {
 				filter: query.filter,
-				...(query.must ? { must: query.must } : {})
+				...(query.must ? { must: query.must } : {}),
+				...(query.must_not ? { must_not: query.must_not } : {})
 			}
 		},
 		sort: [{ 'timestamp': { order: 'desc' } }],

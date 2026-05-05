@@ -87,17 +87,42 @@ function extractSessionIds(hits: ESHit[]): Set<string> {
 	return sessionIds;
 }
 
+export type NimbleVersion = 'v1' | 'v2';
+
 /**
- * Step 1: Discovery - fetch logs with v2 origin filter, extract session IDs
+ * Step 1: Discovery - fetch logs with origin filter, extract session IDs
+ * v2: match logs containing 'app.v2.breeze.in'
+ * v1: match Nimble service logs that do NOT contain 'app.v2.breeze.in'
  */
-async function discoverSessionIds(cookie: string, chunk: TimeChunk): Promise<Set<string>> {
+async function discoverSessionIds(cookie: string, chunk: TimeChunk, version: NimbleVersion = 'v2'): Promise<Set<string>> {
+	if (version === 'v2') {
+		const hits = await queryESWithPagination(cookie, {
+			filter: [
+				{ range: { 'timestamp': { gte: chunk.start, lte: chunk.end } } },
+				{ match_phrase: { message: V2_ORIGIN_FILTER } }
+			]
+		});
+		return extractSessionIds(hits);
+	}
+
+	// v1: Nimble service logs excluding v2 origin
 	const hits = await queryESWithPagination(cookie, {
 		filter: [
-			{ range: { 'timestamp': { gte: chunk.start, lte: chunk.end } } },
+			{ range: { 'timestamp': { gte: chunk.start, lte: chunk.end } } }
+		],
+		must: {
+			bool: {
+				should: [
+					{ prefix: { service: 'Nimble' } },
+					{ wildcard: { pod_name: '*analytics*' } }
+				],
+				minimum_should_match: 1
+			}
+		},
+		must_not: [
 			{ match_phrase: { message: V2_ORIGIN_FILTER } }
 		]
 	});
-
 	return extractSessionIds(hits);
 }
 
@@ -123,9 +148,9 @@ async function fetchSessionLogs(cookie: string, sessionIds: string[], chunk: Tim
 /**
  * Process a single time chunk: discover sessions, then fetch their full logs
  */
-async function processChunk(cookie: string, chunk: TimeChunk): Promise<ESHit[]> {
+async function processChunk(cookie: string, chunk: TimeChunk, version: NimbleVersion = 'v2'): Promise<ESHit[]> {
 	// Step 1: Discovery
-	const sessionIds = await discoverSessionIds(cookie, chunk);
+	const sessionIds = await discoverSessionIds(cookie, chunk, version);
 
 	if (sessionIds.size === 0) return [];
 
@@ -148,10 +173,22 @@ export async function fetchAllSessionLogs(
 	from: Date,
 	to: Date
 ): Promise<ESHit[]> {
+	return fetchSessionLogsForVersion(cookie, from, to, 'v2');
+}
+
+/**
+ * Fetch session logs for a specific Nimble version (v1 or v2)
+ */
+export async function fetchSessionLogsForVersion(
+	cookie: string,
+	from: Date,
+	to: Date,
+	version: NimbleVersion
+): Promise<ESHit[]> {
 	const chunks = splitTimeRange(from, to);
 
 	// Process chunks in parallel with concurrency limit
-	const chunkTasks = chunks.map(chunk => () => processChunk(cookie, chunk));
+	const chunkTasks = chunks.map(chunk => () => processChunk(cookie, chunk, version));
 	const chunkResults = await parallelLimit(chunkTasks, CHUNK_CONCURRENCY);
 
 	// Deduplicate by _id

@@ -42,14 +42,73 @@ function hasErrorFields(log: ParsedLog): boolean {
 	return !!(log.value.errorMessage || log.value.errorDetails || log.value.errorResponse);
 }
 
-function detectInstrument(log: ParsedLog): InstrumentType | null {
-	const payload = JSON.stringify(log.value ?? {}) + ' ' + log.source;
-	for (const [instrument, keywords] of Object.entries(INSTRUMENT_KEYWORDS)) {
-		for (const kw of keywords) {
-			if (payload.includes(kw)) return instrument as InstrumentType;
-		}
-	}
+/**
+ * Map a raw payment method type string to our instrument categories.
+ * Sources: PaymentInstrument.selectItem (pmt), verifyPaymentAttempt (paymentMethodType),
+ * processHeadless action, autoRetryTxn instrument.
+ */
+function mapToInstrument(pmt: string): InstrumentType | null {
+	if (!pmt) return null;
+	const upper = pmt.toUpperCase();
+	if (upper.includes('UPI') || upper === 'UPI_INTENT' || upper === 'UPI_COLLECT' || upper === 'UPI_PAY') return 'upi';
+	if (upper.includes('CARD') || upper === 'EMI' || upper.includes('BAJAJ') || upper.includes('AMEX')) return 'card';
+	if (upper.includes('NB') || upper.includes('NETBANKING')) return 'netbanking';
+	if (upper.includes('WALLET') || upper.includes('BREEZE_WALLET')) return 'wallet';
+	if (upper.includes('BNPL') || upper.includes('PAYLATER') || upper.includes('PAY_LATER') || upper.includes('LAZYPAY') || upper.includes('SIMPL') || upper.includes('SNAPMINT') || upper.includes('CONSUMER_FINANCE')) return 'bnpl';
+	if (upper.includes('COD') || upper.includes('CASH')) return 'cod';
 	return null;
+}
+
+/**
+ * Extract instrument type from a processHeadless/processHeadlessSync FunctionCalled payload.
+ * action field: "upiTxn", "upi", "cardTxn", "nbTxn", "walletTxn", "consumerFinanceTxn"
+ */
+function instrumentFromHeadlessAction(log: ParsedLog): InstrumentType | null {
+	const fcp = log.value?.functionCallParams as Record<string, unknown> | undefined;
+	const payload = fcp?.payload as Record<string, unknown> | undefined;
+	const inner = payload?.payload as Record<string, unknown> | undefined;
+	const action = inner?.action;
+	if (typeof action !== 'string') return null;
+	const a = action.toLowerCase();
+	if (a.includes('upi')) return 'upi';
+	if (a.includes('card')) return 'card';
+	if (a.includes('nb') || a.includes('netbanking')) return 'netbanking';
+	if (a.includes('wallet')) return 'wallet';
+	if (a.includes('consumer') || a.includes('bnpl')) return 'bnpl';
+	return null;
+}
+
+/**
+ * Extract paymentMethodType from verifyPaymentAttempt NetworkCallRequest body.
+ * Body is a JSON string inside value.body.
+ */
+function instrumentFromVerifyRequest(log: ParsedLog): InstrumentType | null {
+	const body = log.value?.body;
+	if (typeof body !== 'string') return null;
+	try {
+		const parsed = JSON.parse(body);
+		return mapToInstrument(parsed.paymentMethodType || parsed.paymentMethod || '');
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Extract instrument from PaymentInstrument.selectItem click.
+ * value.info.pmt = "UPI", "UPI_INTENT", "EMI", "CONSUMER_FINANCE", "CARD" etc.
+ */
+function instrumentFromSelectItem(log: ParsedLog): InstrumentType | null {
+	const info = log.value?.info as Record<string, unknown> | undefined;
+	return mapToInstrument((info?.pmt as string) || (info?.pm as string) || '');
+}
+
+/**
+ * Extract instrument from autoRetryTxn Info log.
+ * value.info.instrument = "UPI_INTENT" etc.
+ */
+function instrumentFromAutoRetry(log: ParsedLog): InstrumentType | null {
+	const info = log.value?.info as Record<string, unknown> | undefined;
+	return mapToInstrument((info?.instrument as string) || '');
 }
 
 function sourceMatches(source: string, sources: readonly string[]): boolean {
@@ -85,6 +144,18 @@ function extractDevice(logs: ParsedLog[]): string {
 		}
 	}
 	return 'Unknown';
+}
+
+function markInstrumentFailure(metrics: SessionMetrics, instrument: InstrumentType): void {
+	metrics.txnInitiationFailureCount++;
+	switch (instrument) {
+		case 'upi': metrics.upiFailure = true; break;
+		case 'card': metrics.cardFailure = true; break;
+		case 'netbanking': metrics.netbankingFailure = true; break;
+		case 'wallet': metrics.walletFailure = true; break;
+		case 'bnpl': metrics.bnplFailure = true; break;
+		case 'cod': metrics.codFailure = true; break;
+	}
 }
 
 /**
@@ -157,6 +228,10 @@ export function computeSessionMetrics(sessionId: string, logs: ParsedLog[]): Ses
 	metrics.platform = extractPlatform(logs);
 	metrics.device = extractDevice(logs);
 
+	// Track current instrument being used across payment flow logs
+	let lastInstrument: InstrumentType | null = null;
+	let paymentSuccess = false;
+
 	for (const log of logs) {
 		const source = log.source;
 		const failed = isFailure(log);
@@ -208,14 +283,26 @@ export function computeSessionMetrics(sessionId: string, logs: ParsedLog[]): Ses
 		// --- Payment ---
 		if (sourceMatches(source, START_PAYMENT_SOURCES)) {
 			metrics.reachedPayment = true;
-			metrics.paymentAttemptCount++;
+			// Only count NetworkCallRequest as attempt (not response)
+			if (log.event === 'NetworkCallRequest') {
+				metrics.paymentAttemptCount++;
+			}
 			if (isResponse && failed) metrics.startPaymentApiFailure = true;
 		}
 		if (sourceMatches(source, PAYMENT_VERIFY_SOURCES)) {
+			// verifyPaymentAttempt request has paymentMethodType in body
+			if (log.event === 'NetworkCallRequest') {
+				const inst = instrumentFromVerifyRequest(log);
+				if (inst) lastInstrument = inst;
+			}
 			if (isResponse && failed) {
 				metrics.txnPollFailureCount++;
 			} else if (isResponse && !failed) {
-				metrics.txnInitiationSuccessCount++;
+				// verifyPaymentAttempt success (approve=true) = payment initiated successfully
+				const resp = log.value?.response as Record<string, unknown> | undefined;
+				if (resp?.approve === true) {
+					metrics.txnInitiationSuccessCount++;
+				}
 			}
 		}
 		if (sourceMatches(source, CUSTOM_PAYMENT_SOURCES)) {
@@ -229,22 +316,69 @@ export function computeSessionMetrics(sessionId: string, logs: ParsedLog[]): Ses
 			}
 		}
 
-		// --- HyperSDK ---
+		// --- HyperSDK / Instrument Detection ---
 		if (sourceMatches(source, HYPERSDK_SOURCES)) {
 			if (failed) metrics.hypersdkErrorCount++;
 
-			// Detect instrument failures from HyperSDK events
-			if (isResponse && failed) {
-				const instrument = detectInstrument(log);
-				if (instrument) {
-					metrics.txnInitiationFailureCount++;
-					switch (instrument) {
-						case 'upi': metrics.upiFailure = true; break;
-						case 'card': metrics.cardFailure = true; break;
-						case 'netbanking': metrics.netbankingFailure = true; break;
-						case 'wallet': metrics.walletFailure = true; break;
-						case 'bnpl': metrics.bnplFailure = true; break;
-						case 'cod': metrics.codFailure = true; break;
+			// Detect instrument from processHeadless FunctionCalled action (upiTxn, cardTxn, etc.)
+			if (log.event === 'FunctionCalled') {
+				const inst = instrumentFromHeadlessAction(log);
+				if (inst) lastInstrument = inst;
+			}
+		}
+
+		// PaymentInstrument.selectItem click — user selected an instrument
+		if (source === 'PaymentInstrument.selectItem' && log.event === 'Click') {
+			const inst = instrumentFromSelectItem(log);
+			if (inst) lastInstrument = inst;
+		}
+
+		// PaymentOptions.choosePaymentOption click — user chose a payment option group
+		if (source === 'PaymentOptions.choosePaymentOption' && log.event === 'Click') {
+			const info = log.value?.info as Record<string, unknown> | undefined;
+			const po = info?.po as Record<string, unknown> | undefined;
+			const inst = mapToInstrument((po?.pmt as string) || '');
+			if (inst) lastInstrument = inst;
+		}
+
+		// autoRetryTxn — has instrument type and indicates a failure
+		if (source === 'autoRetryTxn' && log.event === 'Info') {
+			const info = log.value?.info as Record<string, unknown> | undefined;
+			const inst = instrumentFromAutoRetry(log);
+			if (inst) {
+				lastInstrument = inst;
+				// autoRetryTxn always means the previous attempt failed
+				markInstrumentFailure(metrics, inst);
+			}
+		}
+
+		// getEulerPaymentStatus response — actual payment outcome
+		if (source === 'getEulerPaymentStatus' && log.event === 'NetworkCallResponse') {
+			const resp = log.value?.response as Record<string, unknown> | undefined;
+			const status = (resp?.status as string) || '';
+			if (status === 'CHARGED') {
+				paymentSuccess = true;
+				metrics.txnInitiationSuccessCount++;
+			} else if (status && status !== 'PENDING_VBV' && status !== 'NEW') {
+				// Terminal failure states: AUTHENTICATION_FAILED, AUTHORIZATION_FAILED, JUSPAY_DECLINED, etc.
+				if (lastInstrument) {
+					markInstrumentFailure(metrics, lastInstrument);
+				}
+			}
+			// PENDING_VBV means still in progress, don't count yet
+		}
+
+		// hyperCallbackHandler — check for txn results with errors
+		if (source === 'hyperCallbackHandler' && log.event === 'Info') {
+			const info = log.value?.info as Record<string, unknown> | undefined;
+			const eventData = info?.event as Record<string, unknown> | undefined;
+			const payload = eventData?.payload as Record<string, unknown> | undefined;
+			if (payload) {
+				const hasError = payload.error === true;
+				const errorCode = payload.errorCode as string;
+				if (hasError || (errorCode && errorCode !== '')) {
+					if (lastInstrument) {
+						markInstrumentFailure(metrics, lastInstrument);
 					}
 				}
 			}
